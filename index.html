@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BORA - Serviços Informais</title>
+    <!-- Inclui Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+        }
+        /* Estilos personalizados para o foco dos inputs */
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.5); /* Cor azul suave ao focar */
+        }
+        .section {
+            display: none; /* Todas as seções ocultas por padrão */
+        }
+        .section.active {
+            display: block; /* Apenas a seção ativa é visível */
+        }
+        .message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-weight: bold;
+            z-index: 1000;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            animation: fadeOut 4s forwards;
+        }
+
+        .message-box.success {
+            background-color: #d1fae5; /* green-100 */
+            color: #065f46; /* green-900 */
+            border: 1px solid #34d399; /* green-400 */
+        }
+
+        .message-box.error {
+            background-color: #fee2e2; /* red-100 */
+            color: #991b1b; /* red-900 */
+            border: 1px solid #f87171; /* red-400 */
+        }
+
+        @keyframes fadeOut {
+            0% { opacity: 1; transform: translateX(-50%) translateY(0); }
+            80% { opacity: 1; }
+            100% { opacity: 0; transform: translateX(-50%) translateY(-20px); display: none; }
+        }
+    </style>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        // Importa as funções necessárias do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js";
+        import { getAuth, signInAnonymously, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, onSnapshot, collection, query, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js";
+
+        // SUA CONFIGURAÇÃO DO FIREBASE (FORNECIDA POR VOCÊ)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXXw_8oJc1Wgywqaf1SCNuJKgjwQOZT70",
+            authDomain: "bora-e087e.firebaseapp.com",
+            projectId: "bora-e087e",
+            storageBucket: "bora-e087e.firebasestorage.app",
+            messagingSenderId: "845471084845",
+            appId: "1:845471084845:web:9a78353f025989d33d23a4",
+            measurementId: "G-6YRNRVD31P"
+        };
+        
+        // Define o appId para ser o projectId do seu Firebase para consistência nas paths do Firestore
+        const appId = firebaseConfig.projectId;
+
+        // Inicializa o Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        console.log('Firebase Config carregada:', firebaseConfig); // Adicionado para depuração
+        console.log('App ID:', appId); // Adicionado para depuração
+        console.log('Auth object initialized:', auth); // Verifica se o objeto auth está presente
+
+        // Variáveis globais para uso no script principal
+        window.db = db;
+        window.auth = auth;
+        window.appId = appId;
+        window.currentUserId = null; // Para armazenar o UID do utilizador logado
+        window.hasRegisteredProfile = false; // Novo flag: true se o utilizador tem um perfil registado no Firestore
+        window.isAuthReady = false; // Novo flag: true se o estado de autenticação foi determinado
+
+        // Elemento para exibir o status de autenticação
+        const authStatusSpan = document.createElement('span');
+        authStatusSpan.id = 'auth-status';
+        authStatusSpan.className = 'text-sm text-gray-200 ml-4';
+        
+        // Função para exibir mensagens na tela (substitui alert())
+        function showMessage(message, type = 'info') {
+            const messageBox = document.createElement('div');
+            messageBox.className = `message-box ${type}`;
+            messageBox.textContent = message;
+            document.body.appendChild(messageBox);
+
+            // Remove a mensagem após um tempo
+            setTimeout(() => {
+                messageBox.remove();
+            }, 3000);
+        }
+        window.showMessage = showMessage; // Torna a função acessível globalmente
+
+        // Função para habilitar/desabilitar elementos dos formulários e navegação
+        // Agora depende de window.hasRegisteredProfile E se está autenticado
+        function setFormAndNavState(isAuthenticated, profileRegistered) {
+            console.log(`Chamando setFormAndNavState com isAuthenticated=${isAuthenticated}, profileRegistered=${profileRegistered}`);
+            
+            // Botões dos formulários (submeter)
+            const registerFormSubmit = document.getElementById('register-form')?.querySelector('button[type="submit"]');
+            const createAdFormSubmit = document.getElementById('create-ad-form')?.querySelector('button[type="submit"]');
+            const sendMessageFormSubmit = document.getElementById('send-message-form')?.querySelector('button[type="submit"]');
+            const loginFormSubmit = document.getElementById('login-form')?.querySelector('button[type="submit"]');
+
+            // Botões de navegação
+            const navRegister = document.querySelector('.nav-button[data-target="register"]');
+            const navCreateAd = document.querySelector('.nav-button[data-target="create-ad"]');
+            const navMessages = document.querySelector('.nav-button[data-target="messages"]');
+            const navLogin = document.querySelector('.nav-button[data-target="login"]');
+            const navLogout = document.getElementById('logout-button');
+
+            // Lógica de habilitação/desabilitação
+            if (isAuthenticated && profileRegistered) {
+                // Utilizador autenticado E com perfil registado: Acesso total
+                if (registerFormSubmit) registerFormSubmit.disabled = true;
+                if (createAdFormSubmit) createAdFormSubmit.disabled = false;
+                if (sendMessageFormSubmit) sendMessageFormSubmit.disabled = false;
+                if (loginFormSubmit) loginFormSubmit.disabled = true;
+
+                if (navRegister) navRegister.disabled = true;
+                if (navCreateAd) navCreateAd.disabled = false;
+                if (navMessages) navMessages.disabled = false;
+                if (navLogin) navLogin.disabled = true;
+                if (navLogout) navLogout.style.display = 'block'; // Mostra botão Sair
+                console.log('UI state: Full access.');
+            } else if (isAuthenticated && !profileRegistered) {
+                // Utilizador autenticado (por exemplo, anónimo persistente), mas SEM perfil registado
+                if (registerFormSubmit) registerFormSubmit.disabled = false; // Deve preencher o cadastro
+                if (createAdFormSubmit) createAdFormSubmit.disabled = true;
+                if (sendMessageFormSubmit) sendMessageFormSubmit.disabled = true;
+                if (loginFormSubmit) loginFormSubmit.disabled = true; // Já autenticado, não precisa fazer login de novo
+
+                if (navRegister) navRegister.disabled = false; // Força a ir para Cadastro
+                if (navCreateAd) navCreateAd.disabled = true;
+                if (navMessages) navMessages.disabled = true;
+                if (navLogin) navLogin.disabled = true;
+                if (navLogout) navLogout.style.display = 'block'; // Pode sair
+                console.log('UI state: Authenticated but no profile. Force registration.');
+            } else {
+                // Utilizador NÃO autenticado
+                if (registerFormSubmit) registerFormSubmit.disabled = false;
+                if (createAdFormSubmit) createAdFormSubmit.disabled = true;
+                if (sendMessageFormSubmit) sendMessageFormSubmit.disabled = true;
+                if (loginFormSubmit) loginFormSubmit.disabled = false;
+
+                if (navRegister) navRegister.disabled = false;
+                if (navCreateAd) navCreateAd.disabled = true;
+                if (navMessages) navMessages.disabled = true;
+                if (navLogin) navLogin.disabled = false;
+                if (navLogout) navLogout.style.display = 'none'; // Esconde botão Sair
+                console.log('UI state: Not authenticated. Limited access.');
+            }
+        }
+
+        // Função para alternar a visibilidade das seções
+        function showSection(targetId) {
+            // Seções que exigem um perfil registado no Firestore
+            const sectionsRequiringRegisteredProfile = ['create-ad', 'messages'];
+            
+            // Redireciona para a home se tentar aceder a uma secção restrita sem perfil
+            if (sectionsRequiringRegisteredProfile.includes(targetId) && !window.hasRegisteredProfile) {
+                showMessage('Você precisa estar autenticado E ter um perfil registado para aceder a esta secção. Por favor, complete o seu cadastro ou faça login.', 'error');
+                document.querySelectorAll('.section').forEach(section => { section.classList.remove('active'); });
+                document.getElementById('home').classList.add('active'); // Redireciona para home
+                return;
+            }
+
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('active');
+            });
+            document.getElementById(targetId).classList.add('active');
+        }
+        window.showSection = showSection; // Torna a função acessível globalmente
+
+        // Observa mudanças no estado de autenticação
+        onAuthStateChanged(auth, async (user) => {
+            console.log('onAuthStateChanged triggered. User:', user ? user.uid : 'null');
+            window.isAuthReady = true; // O estado de autenticação foi determinado
+
+            if (user) {
+                window.currentUserId = user.uid;
+                authStatusSpan.textContent = `Autenticado como: ${user.uid.substring(0, 8)}...`;
+                console.log('Utilizador autenticado no Firebase:', user.uid);
+
+                // **PASSO CRÍTICO:** Verifica se o utilizador autenticado tem um perfil registado no Firestore
+                try {
+                    const profileDocRef = doc(db, `artifacts/${appId}/users/${user.uid}/profile`, 'user_data');
+                    const profileDocSnap = await getDoc(profileDocRef);
+                    
+                    if (profileDocSnap.exists()) {
+                        window.hasRegisteredProfile = true;
+                        showMessage(`Bem-vindo(a) de volta, ${profileDocSnap.data().name || user.uid.substring(0, 8)}!`, 'success');
+                        console.log('Perfil encontrado no Firestore. hasRegisteredProfile:', window.hasRegisteredProfile);
+                        setFormAndNavState(true, true); // Autenticado e com perfil
+                        loadAds(); // Carrega dados públicos
+                        loadMessages(); // Carrega mensagens se com perfil
+                    } else {
+                        // Utilizador autenticado (anónimo ou por email/senha), mas SEM UM PERFIL REGISTADO NO FIRESTORE
+                        window.hasRegisteredProfile = false;
+                        showMessage('Sessão ativa. Por favor, complete o seu cadastro para aceder a todas as funcionalidades.', 'info');
+                        console.log('Perfil NÃO encontrado no Firestore. hasRegisteredProfile:', window.hasRegisteredProfile);
+                        setFormAndNavState(true, false); // Autenticado, mas sem perfil
+                        loadAds(); // Apenas carrega anúncios para pesquisa
+                    }
+                } catch (error) {
+                    console.error('Erro ao verificar perfil do utilizador no Firestore:', error);
+                    window.hasRegisteredProfile = false;
+                    showMessage('Erro ao verificar perfil. Por favor, tente novamente.', 'error');
+                    setFormAndNavState(false, false); // Default para não autenticado em caso de erro
+                    loadAds();
+                }
+            } else {
+                // Nenhum utilizador autenticado
+                window.currentUserId = null;
+                window.hasRegisteredProfile = false;
+                authStatusSpan.textContent = 'Não Autenticado';
+                console.log('Nenhum utilizador autenticado.');
+                setFormAndNavState(false, false); // Não autenticado e sem perfil
+                loadAds(); // Pode carregar anúncios para pesquisa
+            }
+        });
+
+        // --- Funções para interagir com o Firestore ---
+
+        // Carrega Anúncios do Firestore
+        async function loadAds() {
+            if (!window.isAuthReady) {
+                console.log('Autenticação não pronta. Não é possível carregar anúncios.');
+                return;
+            }
+            const adsCollectionRef = collection(db, `artifacts/${appId}/public/data/ads`);
+            onSnapshot(adsCollectionRef, (snapshot) => {
+                const fetchedAds = [];
+                snapshot.forEach(doc => {
+                    fetchedAds.push({ id: doc.id, ...doc.data() });
+                });
+                window.ads = fetchedAds; // Atualiza a variável global de anúncios
+                displaySearchResults(window.ads); // Exibe os anúncios na interface
+                console.log('Anúncios carregados/atualizados:', fetchedAds);
+            }, (error) => {
+                console.error("Erro ao carregar anúncios:", error);
+                showMessage("Erro ao carregar anúncios.", "error");
+            });
+        }
+        window.loadAds = loadAds; // Torna acessível globalmente
+
+        // Carrega Mensagens do Firestore
+        async function loadMessages() {
+            // Mensagens só carregam se o utilizador está autenticado E TEM PERFIL REGISTADO
+            if (!window.currentUserId || !window.hasRegisteredProfile) { 
+                console.log('Utilizador não autenticado ou sem perfil. Não é possível carregar mensagens.');
+                return;
+            }
+            const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
+            const q = query(messagesCollectionRef); // Pode adicionar filtros se necessário
+            onSnapshot(q, (snapshot) => {
+                const messageListDiv = document.getElementById('message-list');
+                messageListDiv.innerHTML = ''; // Limpa as mensagens existentes
+                snapshot.forEach(doc => {
+                    const msg = doc.data();
+                    const isMyMessage = msg.senderId === window.currentUserId;
+                    const messageHtml = `
+                        <div class="flex items-start ${isMyMessage ? 'justify-end' : ''} space-x-3">
+                            ${!isMyMessage ? `<div class="flex-shrink-0 w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center text-blue-800 font-bold">${msg.senderName ? msg.senderName.substring(0, 2).toUpperCase() : '??'}</div>` : ''}
+                            <div class="flex-grow ${isMyMessage ? 'bg-green-100 text-right' : 'bg-blue-100'} p-3 rounded-lg shadow-sm">
+                                <p class="font-semibold ${isMyMessage ? 'text-green-800' : 'text-blue-800'} ${isMyMessage ? 'text-right' : ''}">${isMyMessage ? 'Você' : (msg.senderName || 'Desconhecido')}</p>
+                                <p class="text-gray-700 ${isMyMessage ? 'text-right' : ''}">${msg.text}</p>
+                                <span class="text-xs text-gray-500 block ${isMyMessage ? 'text-left' : 'text-right'} mt-1">${msg.timestamp && typeof msg.timestamp.toDate === 'function' ? new Date(msg.timestamp.toDate()).toLocaleTimeString() + ' - ' + new Date(msg.timestamp.toDate()).toLocaleDateString() : 'Sem data'}</span>
+                            </div>
+                            ${isMyMessage ? `<div class="flex-shrink-0 w-10 h-10 bg-green-200 rounded-full flex items-center justify-center text-green-800 font-bold">VC</div>` : ''}
+                        </div>
+                    `;
+                    messageListDiv.innerHTML += messageHtml;
+                });
+                messageListDiv.scrollTop = messageListDiv.scrollHeight; // Rola para o final
+                console.log('Mensagens carregadas/atualizadas.');
+            }, (error) => {
+                console.error("Erro ao carregar mensagens:", error);
+                showMessage("Erro ao carregar mensagens.", "error");
+            });
+        }
+        window.loadMessages = loadMessages; // Torna acessível globalmente
+
+        // Função para exibir resultados de busca (permanece igual, mas usa window.ads)
+        function displaySearchResults(results) {
+            const searchResultsDiv = document.getElementById('search-results');
+            searchResultsDiv.innerHTML = ''; // Limpa resultados anteriores
+
+            if (results.length === 0) {
+                searchResultsDiv.innerHTML = '<p class="text-gray-500 text-center col-span-full">Nenhum serviço encontrado. Tente ajustar os filtros.</p>';
+                return;
+            }
+
+            results.forEach(ad => {
+                const adCard = `
+                    <div class="bg-gray-50 p-4 rounded-lg shadow-sm flex flex-col h-full">
+                        <img src="${ad.imageUrl}" alt="Imagem do serviço de ${ad.category}" class="w-full h-32 object-cover rounded-md mb-3">
+                        <h3 class="text-xl font-bold text-gray-800 mb-2">${ad.title}</h3>
+                        <p class="text-gray-600 text-sm mb-2 flex-grow">${ad.description}</p>
+                        <div class="text-gray-700 text-sm mb-1">
+                            <span class="font-semibold">Categoria:</span> ${ad.category.charAt(0).toUpperCase() + ad.category.slice(1)}
+                        </div>
+                        <div class="text-gray-700 text-sm mb-1">
+                            <span class="font-semibold">Preço:</span> ${ad.price}
+                        </div>
+                        <div class="text-gray-700 text-sm mb-3">
+                            <span class="font-semibold">Localização:</span> ${ad.location}
+                        </div>
+                        <button class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors mt-auto w-full">Entrar em Contacto</button>
+                    </div>
+                `;
+                searchResultsDiv.innerHTML += adCard;
+            });
+        }
+        window.displaySearchResults = displaySearchResults; // Torna acessível globalmente
+
+        // Adiciona event listeners aos botões de navegação
+        document.querySelectorAll('.nav-button, [data-target]').forEach(button => {
+            button.addEventListener('click', (event) => {
+                const targetId = event.target.dataset.target;
+                if (targetId) {
+                    showSection(targetId);
+                }
+            });
+        });
+
+        // Lógica para o formulário de Cadastro de Utilizador (RF01 - CSU01)
+        document.getElementById('register-form').addEventListener('submit', async function(event) {
+            event.preventDefault(); // Impede o recarregamento da página
+
+            if (window.hasRegisteredProfile) {
+                window.showMessage('Você já está registado. Apenas pode atualizar o seu perfil.', 'info');
+                console.log('Tentativa de registo, mas utilizador já tem perfil.');
+                return;
+            }
+
+            const email = document.getElementById('reg-email').value;
+            const password = document.getElementById('reg-password').value; // Senha para o cadastro
+            const name = document.getElementById('reg-name').value;
+            const phone = document.getElementById('reg-phone').value;
+            const location = document.getElementById('reg-location').value;
+
+            if (name && email && password && phone && location) {
+                try {
+                    // 1. Criar novo utilizador com email e password
+                    console.log('Tentando criar novo utilizador com email e password...');
+                    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                    const newUser = userCredential.user;
+                    console.log('Utilizador Firebase criado:', newUser.uid);
+
+                    // 2. Guardar o perfil no Firestore associado ao UID do novo utilizador
+                    await setDoc(doc(db, `artifacts/${appId}/users/${newUser.uid}/profile`, 'user_data'), {
+                        userId: newUser.uid,
+                        name: name,
+                        email: email,
+                        phone: phone,
+                        location: location,
+                        createdAt: serverTimestamp() 
+                    });
+                    console.log('Perfil de utilizador guardado no Firestore!');
+                    window.showMessage('Registo concluído! Bem-vindo(a) ao BORA.', 'success');
+                    this.reset(); // Limpa o formulário
+
+                    // onAuthStateChanged será acionado e atualizará a UI
+                    setTimeout(() => {
+                        showSection('home');
+                    }, 3000);
+
+                } catch (e) {
+                    console.error('Erro no processo de registo: ', e);
+                    let errorMessage = 'Erro ao registar utilizador. Tente novamente.';
+                    if (e.code === 'auth/email-already-in-use') {
+                        errorMessage = 'Este email já está registado. Por favor, use outro email ou faça login.';
+                    } else if (e.code === 'auth/weak-password') {
+                        errorMessage = 'A senha é muito fraca. Por favor, use pelo menos 6 caracteres.';
+                    }
+                    window.showMessage(errorMessage, 'error');
+                }
+            } else {
+                window.showMessage('Por favor, preencha todos os campos para o registo (incluindo a senha).', 'error');
+            }
+        });
+
+        // Lógica para o formulário de Login (NOVO)
+        document.getElementById('login-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('login-email').value;
+            const password = document.getElementById('login-password').value;
+
+            if (email && password) {
+                try {
+                    console.log('Tentando iniciar sessão com email e password...');
+                    await signInWithEmailAndPassword(auth, email, password);
+                    console.log('Login bem-sucedido!');
+                    window.showMessage('Login bem-sucedido! Bem-vindo(a) de volta.', 'success');
+                    this.reset();
+
+                    setTimeout(() => {
+                        showSection('home');
+                    }, 3000);
+
+                } catch (e) {
+                    console.error('Erro ao fazer login: ', e);
+                    let errorMessage = 'Erro ao fazer login. Verifique as credenciais.';
+                    if (e.code === 'auth/invalid-email' || e.code === 'auth/user-not-found' || e.code === 'auth/wrong-password') {
+                        errorMessage = 'Email ou senha inválidos.';
+                    }
+                    window.showMessage(errorMessage, 'error');
+                }
+            } else {
+                window.showMessage('Por favor, insira o email e a senha para fazer login.', 'error');
+            }
+        });
+
+        // Lógica para o botão de Sair (Logout) (NOVO)
+        document.getElementById('logout-button').addEventListener('click', async () => {
+            try {
+                console.log('Tentando sair...');
+                await signOut(auth);
+                console.log('Sessão terminada com sucesso.');
+                window.showMessage('Sessão terminada. Até breve!', 'info');
+                window.currentUserId = null;
+                window.hasRegisteredProfile = false;
+                setFormAndNavState(false, false); // Reseta o estado da UI para não autenticado
+                showSection('home'); // Volta para a página inicial
+            } catch (error) {
+                console.error('Erro ao sair:', error);
+                window.showMessage('Erro ao terminar sessão. Tente novamente.', 'error');
+            }
+        });
+
+
+        // Lógica para o formulário de Criar Anúncio (RF02 - CSU02)
+        document.getElementById('create-ad-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            console.log('A tentar criar anúncio...');
+            console.log('isAuthReady:', window.isAuthReady, 'currentUser:', auth.currentUser ? auth.currentUser.uid : 'null', 'hasRegisteredProfile:', window.hasRegisteredProfile); // Depuração adicional
+            
+            if (!window.isAuthReady || !auth.currentUser || !window.hasRegisteredProfile) { // Check mais rigoroso
+                window.showMessage('Você precisa estar autenticado E ter um perfil registado para criar um anúncio.', 'error');
+                console.error('Tentativa de criar anúncio sem autenticação ou perfil completo.');
+                return;
+            }
+
+            const title = document.getElementById('ad-title').value;
+            const description = document.getElementById('ad-description').value;
+            const category = document.getElementById('ad-category').value;
+            const price = document.getElementById('ad-price').value;
+            const location = document.getElementById('ad-location').value;
+            // A parte de fotos é apenas uma simulação no front-end, não será enviada ao Firestore diretamente
+
+            console.log('Dados do formulário:', { title, description, category, price, location });
+
+            if (title && description && category && category !== '' && location) { // Adicionada verificação para category não ser vazio
+                try {
+                    const newAdRef = await addDoc(collection(db, `artifacts/${appId}/public/data/ads`), {
+                        userId: auth.currentUser.uid,
+                        title: title,
+                        description: description,
+                        category: category,
+                        price: price || 'A Combinar',
+                        location: location,
+                        imageUrl: `https://placehold.co/400x200/${Math.floor(Math.random()*16777215).toString(16)}/FFFFFF?text=${category.toUpperCase()}`,
+                        createdAt: serverTimestamp()
+                    });
+                    console.log('Novo anúncio criado no Firestore com ID:', newAdRef.id);
+                    window.showMessage('Anúncio publicado com sucesso! Ele passará por moderação.', 'success');
+                    this.reset(); // Limpa o formulário
+
+                    // loadAds() será chamado automaticamente pelo onSnapshot
+
+                    setTimeout(() => {
+                        showSection('search-services'); // Redireciona para a busca de serviços
+                    }, 3000);
+
+                } catch (e) {
+                    console.error('Erro ao criar anúncio: ', e);
+                    window.showMessage('Erro ao publicar anúncio. Tente novamente.', 'error');
+                }
+            } else {
+                console.error('Erro: Campos obrigatórios do anúncio não preenchidos.');
+                window.showMessage('Por favor, preencha todos os campos obrigatórios para o anúncio (incluindo a categoria).', 'error');
+            }
+        });
+
+        // Lógica para Buscar Serviços (RF03 - CSU03)
+        const searchKeywordInput = document.getElementById('search-keyword');
+        const searchCategorySelect = document.getElementById('search-category');
+        const searchLocationInput = document.getElementById('search-location');
+        const searchButton = document.getElementById('search-button');
+
+        searchButton.addEventListener('click', () => {
+            const keyword = searchKeywordInput.value.toLowerCase();
+            const category = searchCategorySelect.value.toLowerCase();
+            const location = searchLocationInput.value.toLowerCase();
+
+            // Filtra os anúncios carregados em window.ads (pelo onSnapshot)
+            const filteredAds = window.ads.filter(ad => {
+                const matchesKeyword = ad.title.toLowerCase().includes(keyword) || ad.description.toLowerCase().includes(keyword);
+                const matchesCategory = category === '' || ad.category.toLowerCase() === category;
+                const matchesLocation = ad.location.toLowerCase().includes(location);
+
+                return matchesKeyword && matchesCategory && matchesLocation;
+            });
+
+            window.displaySearchResults(filteredAds);
+        });
+
+        // Lógica para Enviar Mensagem (RF06 - CSU06)
+        document.getElementById('send-message-form').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            if (!window.isAuthReady || !auth.currentUser || !window.hasRegisteredProfile) { // Check mais rigoroso
+                window.showMessage('Você precisa estar autenticado E ter um perfil registado para enviar mensagens.', 'error');
+                console.error('Tentativa de enviar mensagem sem autenticação ou perfil completo.');
+                return;
+            }
+
+            const messageInput = document.getElementById('message-input');
+            const messageText = messageInput.value.trim();
+            
+            // Tenta obter o nome do utilizador logado para exibir no chat
+            let senderName = 'Utilizador Anónimo';
+            try {
+                const userProfileDoc = await getDoc(doc(db, `artifacts/${appId}/users/${auth.currentUser.uid}/profile`, 'user_data'));
+                if (userProfileDoc.exists()) {
+                    senderName = userProfileDoc.data().name || senderName;
+                }
+            } catch (e) {
+                console.warn('Não foi possível buscar o nome do utilizador:', e);
+            }
+
+            if (messageText) {
+                try {
+                    await addDoc(collection(db, `artifacts/${appId}/public/data/messages`), {
+                        senderId: auth.currentUser.uid,
+                        senderName: senderName, // Adiciona o nome do remetente
+                        text: messageText,
+                        timestamp: serverTimestamp() 
+                    });
+                    messageInput.value = ''; // Limpa o input
+                    window.showMessage('Mensagem enviada com sucesso!', 'success');
+                } catch (e) {
+                    console.error('Erro ao enviar mensagem: ', e);
+                    window.showMessage('Erro ao enviar mensagem. Tente novamente.', 'error');
+                }
+            } else {
+                window.showMessage('Por favor, digite sua mensagem antes de enviar.', 'error');
+            }
+        });
+
+        // Inicializa para mostrar a seção de início ao carregar a página
+        document.addEventListener('DOMContentLoaded', () => {
+            showSection('home');
+            // Desabilita os formulários e botões de navegação restritos no início
+            setFormAndNavState(false, false); // Inicializa como não autenticado, sem perfil
+            // Adiciona o span de status de autenticação ao cabeçalho
+            document.querySelector('header .container').appendChild(authStatusSpan);
+            authStatusSpan.textContent = 'A verificar autenticação...'; // Estado inicial
+            // onAuthStateChanged irá lidar com a autenticação persistente
+        });
+    </script>
+</head>
+<body class="bg-gray-100 flex flex-col min-h-screen">
+    <!-- Cabeçalho da aplicação -->
+    <header class="bg-blue-600 text-white p-4 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold rounded-md">BORA</h1>
+            <!-- O status de autenticação será inserido aqui pelo JavaScript -->
+            <!-- Navegação principal -->
+            <nav>
+                <ul class="flex space-x-4">
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="home">Início</button></li>
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="register" disabled>Cadastro</button></li>
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="login" disabled>Login</button></li> <!-- Novo botão de Login -->
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="create-ad" disabled>Criar Anúncio</button></li>
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="search-services">Buscar Serviços</button></li>
+                    <li><button class="nav-button p-2 rounded-md hover:bg-blue-700 transition-colors" data-target="messages" disabled>Mensagens</button></li>
+                    <li><button id="logout-button" class="p-2 rounded-md hover:bg-blue-700 transition-colors" style="display: none;">Sair</button></li> <!-- Botão de Sair -->
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Conteúdo principal da aplicação -->
+    <main class="container mx-auto p-6 flex-grow">
+        <!-- Seção de Início (Home) -->
+        <section id="home" class="section active bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-4">Bem-vindo ao BORA!</h2>
+            <p class="text-gray-700 leading-relaxed">
+                Sua plataforma digital para encontrar e oferecer serviços informais de forma rápida e segura.
+                Conectamos prestadores de serviços autônomos a clientes que necessitam de soluções confiáveis para suas casas e pequenos negócios.
+            </p>
+            <div class="mt-6 flex flex-wrap gap-4">
+                <button class="bg-blue-500 text-white px-6 py-3 rounded-full hover:bg-blue-600 transition-transform transform hover:scale-105 shadow-lg" data-target="search-services">Buscar um Serviço</button>
+                <button class="bg-green-500 text-white px-6 py-3 rounded-full hover:bg-green-600 transition-transform transform hover:scale-105 shadow-lg" data-target="create-ad">Oferecer um Serviço</button>
+            </div>
+            <div class="mt-8 grid md:grid-cols-2 gap-6">
+                <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Para Clientes</h3>
+                    <p class="text-gray-600">Encontre profissionais qualificados para reparos, instalações, serviços domésticos e muito mais. Pesquise por localização, categoria e avaliações.</p>
+                </div>
+                <div class="bg-gray-50 p-6 rounded-lg shadow-sm">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Para Prestadores</h3>
+                    <p class="text-gray-600">Divulgue seus serviços, alcance mais clientes em sua região e gerencie seus agendamentos de forma eficiente. Aumente sua clientela com facilidade.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Seção de Cadastro de Usuário -->
+        <section id="register" class="section bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Cadastro de Usuário</h2>
+            <form id="register-form" class="space-y-4">
+                <div>
+                    <label for="reg-name" class="block text-gray-700 font-medium mb-1">Nome Completo</label>
+                    <input type="text" id="reg-name" name="name" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="reg-email" class="block text-gray-700 font-medium mb-1">E-mail</label>
+                    <input type="email" id="reg-email" name="email" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="reg-password" class="block text-gray-700 font-medium mb-1">Senha</label> <!-- Campo de senha adicionado -->
+                    <input type="password" id="reg-password" name="password" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="reg-phone" class="block text-gray-700 font-medium mb-1">Telefone</label>
+                    <input type="tel" id="reg-phone" name="phone" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="reg-location" class="block text-gray-700 font-medium mb-1">Localização (Cidade/Estado)</label>
+                    <input type="text" id="reg-location" name="location" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors font-semibold shadow-md">Cadastrar</button>
+            </form>
+        </section>
+
+        <!-- Nova Seção de Login -->
+        <section id="login" class="section bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Login</h2>
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label for="login-email" class="block text-gray-700 font-medium mb-1">E-mail</label>
+                    <input type="email" id="login-email" name="email" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="login-password" class="block text-gray-700 font-medium mb-1">Senha</label>
+                    <input type="password" id="login-password" name="password" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors font-semibold shadow-md">Entrar</button>
+            </form>
+        </section>
+
+        <!-- Seção de Criar Anúncio -->
+        <section id="create-ad" class="section bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Criar Novo Anúncio</h2>
+            <form id="create-ad-form" class="space-y-4">
+                <div>
+                    <label for="ad-title" class="block text-gray-700 font-medium mb-1">Título do Anúncio</label>
+                    <input type="text" id="ad-title" name="title" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <div>
+                    <label for="ad-description" class="block text-gray-700 font-medium mb-1">Descrição</label>
+                    <textarea id="ad-description" name="description" rows="4" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required></textarea>
+                </div>
+                <div>
+                    <label for="ad-category" class="block text-gray-700 font-medium mb-1">Categoria</label>
+                    <select id="ad-category" name="category" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                        <option value="">Selecione uma categoria</option>
+                        <option value="eletricista">Eletricista</option>
+                        <option value="encanador">Encanador</option>
+                        <option value="montador">Montador de Móveis</option>
+                        <option value="limpeza">Limpeza</option>
+                        <option value="jardinagem">Jardinagem</option>
+                        <option value="informatica">Informática</option>
+                        <option value="outros">Outros</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="ad-price" class="block text-gray-700 font-medium mb-1">Preço (sugestão ou a combinar)</label>
+                    <input type="text" id="ad-price" name="price" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" placeholder="Ex: R$ 50/hora ou A Combinar">
+                </div>
+                <div>
+                    <label for="ad-location" class="block text-gray-700 font-medium mb-1">Localização (Cidade/Estado)</label>
+                    <input type="text" id="ad-location" name="location" class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                </div>
+                <!-- Simulação de upload de fotos com placeholder -->
+                <div>
+                    <label for="ad-photos" class="block text-gray-700 font-medium mb-1">Fotos (Máximo 3, simulação)</label>
+                    <input type="file" id="ad-photos" name="photos" accept="image/*" multiple class="w-full p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400">
+                    <p class="text-sm text-gray-500 mt-1">Este é um protótipo, o upload de fotos não é funcional.</p>
+                </div>
+                <button type="submit" class="w-full bg-green-600 text-white p-3 rounded-md hover:bg-green-700 transition-colors font-semibold shadow-md">Publicar Anúncio</button>
+            </form>
+        </section>
+
+        <!-- Seção de Buscar Serviços -->
+        <section id="search-services" class="section bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Buscar Serviços</h2>
+            <div class="flex flex-col md:flex-row gap-4 mb-6">
+                <input type="text" id="search-keyword" placeholder="Palavra-chave (ex: eletricista)" class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400">
+                <select id="search-category" class="p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400">
+                    <option value="">Todas as Categorias</option>
+                    <option value="eletricista">Eletricista</option>
+                    <option value="encanador">Encanador</option>
+                    <option value="montador">Montador de Móveis</option>
+                    <option value="limpeza">Limpeza</option>
+                    <option value="jardinagem">Jardinagem</option>
+                    <option value="informatica">Informática</option>
+                    <option value="outros">Outros</option>
+                </select>
+                <input type="text" id="search-location" placeholder="Localização (ex: Goiânia)" class="p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400">
+                <button id="search-button" class="bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors font-semibold shadow-md md:w-auto">Buscar</button>
+            </div>
+            <div id="search-results" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Resultados da busca serão inseridos aqui pelo JavaScript -->
+                <p class="text-gray-500 text-center col-span-full">A carregar anúncios...</p>
+            </div>
+        </section>
+
+        <!-- Seção de Mensagens -->
+        <section id="messages" class="section bg-white p-8 rounded-lg shadow-md mb-8">
+            <h2 class="text-3xl font-bold text-gray-800 mb-6">Minhas Mensagens</h2>
+            <div id="message-list" class="space-y-4 mb-6 h-64 overflow-y-auto border border-gray-200 p-4 rounded-md bg-gray-50">
+                <!-- Mensagens serão carregadas aqui pelo JavaScript do Firestore -->
+                <p class="text-gray-500 text-center">A carregar mensagens...</p>
+            </div>
+            <form id="send-message-form" class="flex gap-2">
+                <input type="text" id="message-input" placeholder="Digite sua mensagem..." class="flex-grow p-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-400" required>
+                <button type="submit" class="bg-blue-600 text-white p-3 rounded-md hover:bg-blue-700 transition-colors font-semibold shadow-md" disabled>Enviar</button>
+            </form>
+        </section>
+    </main>
+
+    <!-- Rodapé da aplicação -->
+    <footer class="bg-gray-800 text-white p-4 text-center mt-auto">
+        <div class="container mx-auto">
+            <p>&copy; 2025 BORA. Todos os direitos reservados.</p>
+        </div>
+    </footer>
+</body>
+</html>
