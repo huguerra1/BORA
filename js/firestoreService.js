@@ -68,7 +68,7 @@ export function observeMessages(callback) {
     const messagesCollectionRef = collection(db, `artifacts/${appId}/public/data/messages`);
     const q = query(messagesCollectionRef); // Pode adicionar filtros (ex: orderBy)
     
-    onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot) => {
         const fetchedMessages = [];
         snapshot.forEach(doc => {
             fetchedMessages.push({ id: doc.id, ...doc.data() });
