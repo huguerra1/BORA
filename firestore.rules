@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Regras recomendadas para o BORA. Publique no console do Firebase
+// (Firestore Database → Regras) ou com `firebase deploy --only firestore:rules`.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Perfil: só o próprio usuário lê e escreve.
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Anúncios: leitura pública; só o dono cria, edita ou apaga.
+    match /artifacts/{appId}/public/data/ads/{adId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // Mensagens: só usuários logados leem; cada um envia em nome próprio; ninguém edita.
+    match /artifacts/{appId}/public/data/messages/{messageId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.senderId == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() <= 2000;
+      allow update, delete: if false;
+    }
+  }
+}

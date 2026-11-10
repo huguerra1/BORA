@@ -1,4 +1,4 @@
-import { showMessage } from './utils.js';
+import { showMessage, escapeHtml, safeImageUrl } from './utils.js';
 
 // Elemento para exibir o status de autenticação
 const authStatusSpan = document.createElement('span');
@@ -125,17 +125,17 @@ export function displaySearchResults(results) {
     results.forEach(ad => {
         const adCard = `
             <div class="bg-gray-50 p-4 rounded-lg shadow-sm flex flex-col h-full">
-                <img src="${ad.imageUrl}" alt="Imagem do serviço de ${ad.category}" class="w-full h-32 object-cover rounded-md mb-3">
-                <h3 class="text-xl font-bold text-gray-800 mb-2">${ad.title}</h3>
-                <p class="text-gray-600 text-sm mb-2 flex-grow">${ad.description}</p>
+                <img src="${escapeHtml(safeImageUrl(ad.imageUrl))}" alt="Imagem do serviço de ${escapeHtml(ad.category)}" class="w-full h-32 object-cover rounded-md mb-3">
+                <h3 class="text-xl font-bold text-gray-800 mb-2">${escapeHtml(ad.title)}</h3>
+                <p class="text-gray-600 text-sm mb-2 flex-grow">${escapeHtml(ad.description)}</p>
                 <div class="text-gray-700 text-sm mb-1">
-                    <span class="font-semibold">Categoria:</span> ${ad.category.charAt(0).toUpperCase() + ad.category.slice(1)}
+                    <span class="font-semibold">Categoria:</span> ${escapeHtml(String(ad.category ?? '').charAt(0).toUpperCase() + String(ad.category ?? '').slice(1))}
                 </div>
                 <div class="text-gray-700 text-sm mb-1">
-                    <span class="font-semibold">Preço:</span> ${ad.price}
+                    <span class="font-semibold">Preço:</span> ${escapeHtml(ad.price)}
                 </div>
                 <div class="text-gray-700 text-sm mb-3">
-                    <span class="font-semibold">Localização:</span> ${ad.location}
+                    <span class="font-semibold">Localização:</span> ${escapeHtml(ad.location)}
                 </div>
                 <button class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors mt-auto w-full">Entrar em Contacto</button>
             </div>
@@ -162,10 +162,10 @@ export function renderMessages(messages, currentUserId) {
         const isMyMessage = msg.senderId === currentUserId;
         const messageHtml = `
             <div class="flex items-start ${isMyMessage ? 'justify-end' : ''} space-x-3">
-                ${!isMyMessage ? `<div class="flex-shrink-0 w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center text-blue-800 font-bold">${msg.senderName ? msg.senderName.substring(0, 2).toUpperCase() : '??'}</div>` : ''}
+                ${!isMyMessage ? `<div class="flex-shrink-0 w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center text-blue-800 font-bold">${msg.senderName ? escapeHtml(String(msg.senderName).substring(0, 2).toUpperCase()) : '??'}</div>` : ''}
                 <div class="flex-grow ${isMyMessage ? 'bg-green-100 text-right' : 'bg-blue-100'} p-3 rounded-lg shadow-sm">
-                    <p class="font-semibold ${isMyMessage ? 'text-green-800' : 'text-blue-800'} ${isMyMessage ? 'text-right' : ''}">${isMyMessage ? 'Você' : (msg.senderName || 'Desconhecido')}</p>
-                    <p class="text-gray-700 ${isMyMessage ? 'text-right' : ''}">${msg.text}</p>
+                    <p class="font-semibold ${isMyMessage ? 'text-green-800' : 'text-blue-800'} ${isMyMessage ? 'text-right' : ''}">${isMyMessage ? 'Você' : escapeHtml(msg.senderName || 'Desconhecido')}</p>
+                    <p class="text-gray-700 ${isMyMessage ? 'text-right' : ''}">${escapeHtml(msg.text)}</p>
                     <span class="text-xs text-gray-500 block ${isMyMessage ? 'text-left' : 'text-right'} mt-1">${msg.timestamp && typeof msg.timestamp.toDate === 'function' ? new Date(msg.timestamp.toDate()).toLocaleTimeString() + ' - ' + new Date(msg.timestamp.toDate()).toLocaleDateString() : 'Sem data'}</span>
                 </div>
                 ${isMyMessage ? `<div class="flex-shrink-0 w-10 h-10 bg-green-200 rounded-full flex items-center justify-center text-green-800 font-bold">VC</div>` : ''}
