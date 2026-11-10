@@ -15,9 +15,11 @@ service cloud.firestore {
       allow read: if true;
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null
+      allow update: if request.auth != null
         && resource.data.userId == request.auth.uid
         && request.resource.data.userId == resource.data.userId;
+      allow delete: if request.auth != null
+        && resource.data.userId == request.auth.uid;
     }
 
     // Mensagens: só usuários logados leem; cada um envia em nome próprio; ninguém edita.

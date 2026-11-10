@@ -9,6 +9,7 @@ let currentUserId = null;
 let hasRegisteredProfile = false;
 let allAds = []; // Armazena localmente os anúncios para filtragem
 let currentUserName = 'Utilizador'; // Armazena o nome do usuário para o chat
+let stopObservingMessages = null; // Cancela o listener de mensagens no logout
 
 // --- Inicialização da Aplicação ---
 document.addEventListener('DOMContentLoaded', () => {
@@ -46,7 +47,8 @@ function handleAuthStateChange(user, profile) {
         showMessage(`Bem-vindo(a) de volta, ${profile.name}!`, 'success');
         
         // Carrega dados privados (mensagens)
-        observeMessages(handleMessagesUpdate);
+        if (stopObservingMessages) stopObservingMessages();
+        stopObservingMessages = observeMessages(handleMessagesUpdate);
 
     } else if (user && !profile) {
         // Usuário LOGADO mas SEM PERFIL (ex: acabou de se registrar, precisa completar)
@@ -67,7 +69,11 @@ function handleAuthStateChange(user, profile) {
         
         updateAuthStatusText('Não Autenticado');
         setFormAndNavState(false, false);
-        // Não precisa fazer nada, o observeMessages será desativado (se implementado com regras de segurança)
+        // As regras do Firestore exigem login para ler mensagens: cancela o listener.
+        if (stopObservingMessages) {
+            stopObservingMessages();
+            stopObservingMessages = null;
+        }
     }
 }
 
